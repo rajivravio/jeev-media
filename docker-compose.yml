@@ -1,0 +1,593 @@
+version: "3.9"
+
+########################### NETWORKS
+# You may customize the network subnet (192.128.45.0/24) below as you please.
+# Docker Compose version 3.5 or higher required to define networks this way.
+
+networks:
+  default:
+    driver: bridge
+  npm_proxy_ms:
+    name: npm_proxy_ms
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.128.45.0/24
+
+########################### EXTENSION FIELDS
+# Helps eliminate repetition of sections
+# More Info on how to use this: https://github.com/htpcBeginner/docker-traefik/pull/228
+
+# Common environment values
+x-environment: &default-tz-puid-pgid
+  TZ: $TZ
+  PUID: $PUID
+  PGID: $PGID
+
+# Keys common to some of the core services that we always to automatically restart on failure
+x-common-keys-core: &common-keys-core
+  networks:
+    - npm_proxy_ms
+  security_opt:
+    - no-new-privileges:true
+  restart: always
+  labels:
+    io.portainer.accesscontrol.teams: administrators
+
+# Keys common to some of the dependent services/apps
+x-common-keys-apps: &common-keys-apps
+  networks:
+    - npm_proxy_ms
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  labels:
+    io.portainer.accesscontrol.teams: administrators
+
+# Keys common to some of the services in media-services.txt
+x-common-keys-media: &common-keys-media
+  networks:
+    - npm_proxy_ms
+  security_opt:
+    - no-new-privileges:true
+  restart: "unless-stopped"
+  labels:
+    io.portainer.accesscontrol.teams: administrators
+
+########################### SERVICES
+services:
+############################# FRONTENDS
+  # Nginx Proxy Manager - Reverse Proxy with LetsEncrypt
+  npm_ms:
+    <<: *common-keys-core # See EXTENSION FIELDS at the top
+    container_name: nginx-proxy-manager-ms
+    image: 'jc21/nginx-proxy-manager:latest'
+    # For Static IP
+    networks:
+    # For Static IP
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.254 # You can specify a static IP
+    # For Dynamic IP
+    # networks:
+    #  - npm_proxy_ms
+    ports:
+      - '880:80' # Public HTTP Port. Port Forwarding on Router is ON.
+      - '8443:443' # Public HTTPS Port. Port Forwarding on Router is ON.
+      - '881:81' # Admin Web Port. Port Forwarding on Router is OFF. Internal Home Network Access only - 192.128.45.254:81.
+    volumes:
+      - $DOCKERDIR/appdata/npm/config:/config
+      - $DOCKERDIR/appdata/npm/letsencrypt:/etc/letsencrypt
+      - $DOCKERDIR/appdata/npm/data:/data
+    environment:
+      DB_SQLITE_FILE: "/config/database.sqlite"
+      DISABLE_IPV6: 'true'
+
+#test
+  # nzbget - Binary newsgrabber (NZB downloader)
+  nzbget_ms:
+    <<: *common-keys-apps # See EXTENSION FIELDS at the top
+    image: lscr.io/linuxserver/nzbget
+    container_name: nzbget-ms
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.216
+    ports:
+      - "6789:6789"
+    volumes:
+      - $DOCKERDIR/appdata/nzbget:/config
+      - $DATADIR/downloads:/data/downloads
+    environment:
+      <<: *default-tz-puid-pgid
+
+
+
+############################# PVRS
+# Overseer - Requester
+  overseerr_ms:
+    image: sctx/overseerr:latest
+    container_name: overseerr-ms
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.27
+    environment:
+      - LOG_LEVEL=debug
+      - TZ=America/Toronto
+    ports:
+      - 5055:5055
+    volumes:
+      - $DOCKERDIR/appdata/overseerr:/app/config
+    restart: unless-stopped
+
+# Radarr - Movie management
+  radarr_ms:
+    <<: *common-keys-media # See EXTENSION FIELDS at the top
+    image: lscr.io/linuxserver/radarr:latest # latest tag was causing "Error parsing column 45"
+    container_name: radarr-ms
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.164
+    ports:
+      - ":7878"
+    volumes:
+      - $DOCKERDIR/appdata/radarr:/config
+      - $DATADIR/downloads:/data/downloads
+      - $DATADIR/media:/data/media
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+
+# Radarr 4K
+  radarr4k:
+    <<: *common-keys-media
+    container_name: "radarr4k"
+    entrypoint:
+      - "/init"
+    environment:
+      <<: *default-tz-puid-pgid
+    hostname: "radarr4k"
+    image: "lscr.io/linuxserver/radarr:latest"
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.165
+    ports:
+      - ":7878/tcp"
+    volumes:
+      - "$DOCKETDIRappdata/radarr4k:/config"
+      - "$DATADIR/downloads:/data/downloads"
+      - "$DATADIR/media:/data/media"
+
+# Sonarr - TV Shows management
+  sonarr_ms:
+    <<: *common-keys-media # See EXTENSION FIELDS at the top
+    image: lscr.io/linuxserver/sonarr
+    container_name: sonarr-ms
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.167
+    ports:
+      - "8989:8989"
+    volumes:
+      - $DOCKERDIR/appdata/sonarr:/config
+      - $DATADIR/downloads:/data/downloads
+      - $DATADIR/media:/data/media
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+
+  readarr-ms:
+    <<: *common-keys-media
+    container_name: "readarr-ms"
+    entrypoint:
+      - "/init"
+    environment:
+      <<: *default-tz-puid-pgid
+    image: "cr.hotio.dev/hotio/readarr:latest"
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.17
+    ports:
+      - ":8787/tcp"
+    volumes:
+      - "$DOCKERDIR/appdata/calibre/server/config/CalibreLibrary:/config/CalibreLibrary"
+      - "$DOCKERDIR/appdata/readarr:/config"
+      - "$DATADIR/media/downloads:/data/downloads"
+      - "$DATADIR/media:/data/media"
+
+
+  # Plex - Media Server
+  plex_ms:
+    <<: *common-keys-media # See EXTENSION FIELDS at the top
+    image: plexinc/pms-docker:public
+    container_name: plex-ms
+    ports:
+      - "32400:32400/tcp"
+      - "3005:3005/tcp"
+      - "8324:8324/tcp"
+      - "32469:32469/tcp"
+      - "1900:1900/udp" # Conflicts with xTeVe and Synology default ports
+      - "32410:32410/udp"
+      - "32412:32412/udp"
+      - "32413:32413/udp"
+      - "32414:32414/udp"
+      - "33400:33400" # If you use Plex Web Tools
+    #devices:
+    #  - /dev/dri:/dev/dri # for harware transcoding
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.2
+    volumes:
+      - $DOCKERDIR/appdata/plexms:/config
+      - $DATADIR/media:/media
+      - /dev/shm:/transcode
+    environment:
+      TZ: $TZ
+      HOSTNAME: "dockerPlex"
+      PLEX_CLAIM_FILE: $PLEX_CLAIM
+      PLEX_UID: $PUID
+      PLEX_GID: $PGID
+      ADVERTISE_IP: https://$PLEX_SERVER_DOMAIN
+
+  prowlarr_ms:
+    <<: *common-keys-apps # See EXTENSION FIELDS at the top
+    image: ghcr.io/linuxserver/prowlarr:develop
+    container_name: prowlarr-ms
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.162
+    ports:
+      - "9696:9696"
+    volumes:
+      - $DOCKERDIR/appdata/prowlarr:/config
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+
+  # Tautulli - Plex Stats and Monitoring
+  tautulli_ms:
+    <<: *common-keys-media # See EXTENSION FIELDS at the top
+    image: linuxserver/tautulli:latest
+    container_name: tautulli-ms
+    ports:
+      - "8181:8181"
+    volumes:
+      - $DOCKERDIR/appdata/tautulli/config:/config
+      - $DOCKERDIR/appdata/plexms/Library/Application Support/Plex Media Server/Logs:/logs:ro # For tautulli Plex log viewer
+    environment:
+      <<: *default-tz-puid-pgid
+
+############################# MEDIA FILE MANAGEMENT
+
+  # Bazarr - Subtitle Management
+  bazarr_ms:
+    <<: *common-keys-media # See EXTENSION FIELDS at the top
+    image: lscr.io/linuxserver/bazarr
+    container_name: bazarr-ms
+    ports:
+      - "6767:6767"
+    volumes:
+      - $DOCKERDIR/appdata/bazarr:/config
+      - $DATADIR/media:/data/media
+    environment:
+      <<: *default-tz-puid-pgid
+
+  handbrake_ms:
+    <<: *common-keys-apps # See EXTENSION FIELDS at the top
+    image: jlesage/handbrake:latest
+    container_name: handbrake-ms
+    ports:
+      - "5801:5800"
+    volumes:
+      - $DATADIR/downloads:/data/downloads
+      - $DOCKERDIR/appdata/handbrake/config:/config
+      - $DOCKERDIR/appdata/handbrake/watch:/watch
+    environment:
+      USER_ID: $PUID
+      GROUP_ID: $PGID
+      UMASK: 002
+      TZ: $TZ
+      KEEP_APP_RUNNING: 1
+      CLEAN_TMP_DIR: 1
+      DISPLAY_WIDTH: 1600
+      DISPLAY_HEIGHT: 960
+      AUTOMATED_CONVERSION_KEEP_SOURCE: 1
+      VNC_PASSWORD: $HANDBRAKE_VNC_PASSWD
+
+
+############################# UTILITIES
+
+# Dozzle - Real-time Docker Log Viewer
+  dozzle_ms:
+    <<: *common-keys-apps # See EXTENSION FIELDS at the top
+    image: amir20/dozzle:latest
+    container_name: dozzle-ms
+    networks:
+      - npm_proxy_ms
+    ports:
+      - "8081:8080" # qBittorrent is using port 8080.
+    environment:
+      DOZZLE_LEVEL: info
+      DOZZLE_TAILSIZE: 300
+      DOZZLE_FILTER: "status=running"
+      # DOZZLE_FILTER: "label=log_me" # limits logs displayed to containers with this label.
+      # DOCKER_HOST: tcp://socket-proxy:2375 # Use this instead if you have Socket Proxy enabled.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Use Docker Socket Proxy and comment this line for improved security.
+
+
+    # File Browser - Explorer
+  filebrowser_ms:
+    <<: *common-keys-core # See EXTENSION FIELDS at the top
+    image: filebrowser/filebrowser:s6
+    container_name: filebrowser-ms
+    ports:
+      - "83:80" # 80 and 81 are used by Nginx Proxy Manager
+    volumes:
+      - $DOCKERDIR/appdata/filebrowser:/config
+      - $USERDIR:/srv
+    environment:
+      <<: *default-tz-puid-pgid
+
+
+  # Docker-GC - Automatic Docker Garbage Collection
+  # Create docker-gc-exclude file
+  dockergc_ms:
+    <<: *common-keys-apps # See EXTENSION FIELDS at the top
+    image: clockworksoul/docker-gc-cron:latest
+    container_name: docker-gc-ms
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Use Docker Socket Proxy and comment this line for improved security.
+      - $DOCKERDIR/appdata/docker-gc/docker-gc-exclude:/etc/docker-gc-exclude # Create empty file
+    environment:
+      CRON: 0 0 0 * * ? # Everyday at midnight. Previously 0 0 * * *
+      FORCE_IMAGE_REMOVAL: 1
+      FORCE_CONTAINER_REMOVAL: 0
+      GRACE_PERIOD_SECONDS: 604800
+      DRY_RUN: 0
+      CLEAN_UP_VOLUMES: 1
+      TZ: $TZ
+      # DOCKER_HOST: tcp://socket-proxy:2375 # Use this if you have Socket Proxy enabled.
+
+
+  # WatchTower - Automatic Docker Container Updates
+  watchtower_ms:
+    <<: *common-keys-core # See EXTENSION FIELDS at the top
+    image: containrrr/watchtower
+    container_name: watchtower-ms
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Use Docker Socket Proxy and comment this line for improved security.
+    environment:
+      TZ: $TZ
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_REMOVE_VOLUMES: "true"
+      WATCHTOWER_INCLUDE_STOPPED: "true"
+      WATCHTOWER_NO_STARTUP_MESSAGE: "false"
+      WATCHTOWER_SCHEDULE: "0 30 12 * * *" # Everyday at 12:30
+      # DOCKER_HOST: tcp://socket-proxy:2375 # Use this if you have Socket Proxy enabled.
+      DOCKER_API_VERSION: "1.40"
+
+########### AutoComposed manual containers
+
+# Calibre-Server
+  caliber-server:
+    <<: *common-keys-media
+    container_name: "caliber-server-ms"
+    environment:
+      - "PATH=/lsiopy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      - "HOME=/config"
+      - "LANGUAGE=en_US.UTF-8"
+      - "LANG=en_US.UTF-8"
+      - "TERM=xterm"
+      - "S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0"
+      - "S6_VERBOSITY=1"
+      - "S6_STAGE2_HOOK=/docker-mods"
+      - "VIRTUAL_ENV=/lsiopy"
+      - "DISPLAY=:1"
+      - "PERL5LIB=/usr/local/bin"
+      - "OMP_WAIT_POLICY=PASSIVE"
+      - "GOMP_SPINCOUNT=0"
+      - "START_DOCKER=true"
+      - "PULSE_RUNTIME_PATH=/defaults"
+      - "NVIDIA_DRIVER_CAPABILITIES=graphics,compat32,utility"
+      - "LSIO_FIRST_PARTY=true"
+      - "CUSTOM_PORT=8080"
+      - "CUSTOM_HTTPS_PORT=8181"
+      - "TITLE=Calibre"
+    image: "linuxserver/calibre:latest"
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.19
+    ports:
+      - ":8080/tcp"
+      - ":8081/tcp"
+    volumes:
+      - "$DOCKERDIR/appdata/calibre/server/config:/config"
+      - "$DOCKERDIR/appdata/calibre/server/plugins:/plugins"
+      - "$DOCKERDIRappdata/calibre/server/uploads:/uploads"
+      - "$DATADIR/media/Books:/Calibre_Library"
+
+# Calibre Web - Library frontend
+  calibre-web:
+    <<: *common-keys-media
+    container_name: "calibre-web-ms"
+    entrypoint:
+      - "/init"
+    environment:
+      - "PATH=/lsiopy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      - "HOME=/root"
+      - "LANGUAGE=en_US.UTF-8"
+      - "LANG=en_US.UTF-8"
+      - "TERM=xterm"
+      - "S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0"
+      - "S6_VERBOSITY=1"
+      - "S6_STAGE2_HOOK=/docker-mods"
+      - "VIRTUAL_ENV=/lsiopy"
+      - "LSIO_FIRST_PARTY=true"
+    image: "linuxserver/calibre-web:latest"
+    networks:
+      npm_proxy_ms:
+        ipv4_address: 192.128.45.20
+    ports:
+      - ":8080/tcp"
+      - ":8081/tcp"
+    volumes:
+      - "$DOCKERDIR/appdata/calibre/server/config/CalibreLibrary:/books"
+      - "$DOCKERDIR/appdata/calibre/web/config:/config"
+
+# Organizr - Home Page / Portal
+  organizr:
+    <<: *common-keys-apps
+    container_name: "organizr-ms"
+    entrypoint:
+      - "/init"
+    environment:
+      - "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      - "S6_REL=2.2.0.3"
+      - "S6_ARCH=amd64"
+      - "S6_BEHAVIOUR_IF_STAGE2_FAILS=2"
+      - "TZ=Etc/UTC"
+      - "PS1=$(whoami)@$(hostname):$(pwd)$"
+      - "HOME=/root"
+      - "TERM=xterm"
+      - "fpm=false"
+      - "branch=v2-master"
+    expose:
+      - "443/tcp"
+      - "80/tcp"
+    image: "organizr/organizr:latest"
+    networks:
+      - "npm_proxy_ms"
+    volumes:
+      - "$DOCKERDIR/appdata/organizr:/config"
+
+# Files
+  files:
+    <<: *common-keys-apps
+    container_name: "files-ms-test"
+    entrypoint:
+      - "/filebrowser"
+    environment:
+      - "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    hostname: "files-ms"
+    image: "filebrowser/filebrowser:latest"
+    ports:
+      - "82:80/tcp"
+    volumes:
+      - "$DOCKERDIR/appdata/files/config/filebrowser.db:/database.db"
+      - "$USERDIR:/srv"
+
+# Plex Meta Manager
+  plex_meta_manager_daily:
+    <<: *common-keys-apps
+    container_name: "plex_meta_manager_daily"
+    entrypoint:
+      - "/tini"
+      - "-s"
+      - "python3"
+      - "plex_meta_manager.py"
+      - "--"
+    environment:
+      - "BRANCH_NAME=master"
+    image: "meisnate12/plex-meta-manager:latest"
+    network_mode: "host"
+    stdin_open: true
+    tty: true
+    volumes:
+      - "$DOCKERDIR/appdata/plex-meta-manager/config:/config"
+
+  speedtest:
+    <<: *common-keys-apps
+    container_name: "speedtest"
+    entrypoint:
+      - "/init"
+    environment:
+      <<: *default-tz-puid-pgid
+    image: "ghcr.io/alexjustesen/speedtest-tracker:latest"
+    networks:
+      - "npm_proxy_ms"
+    ports:
+      - ":443/tcp"
+      - ":80/tcp"
+      - ":9000/tcp"
+    volumes:
+      - "$DOCKERDIR/appdata/speedtest/config:/config"
+
+  dd-agent:
+    <<: *common-keys-core
+    command:
+      - "supervisord"
+      - "-n"
+      - "-c"
+      - "/etc/dd-agent/supervisor.conf"
+    container_name: "dd-agent"
+    environment:
+      - "AGENT_REPO=http://apt.datad0g.com/"
+      - "AGENT_REPO_CHANNEL=stable"
+      - "AGENT_VERSION=1:5.32.8-1"
+      - "API_KEY=44aa8a3e112cd980833b284ac563cd57"
+      - "DD_CONF_LOG_TO_SYSLOG=no"
+      - "DD_CONF_PROCFS_PATH=/host/proc"
+      - "DD_ETC_ROOT=/etc/dd-agent"
+      - "DD_SUPERVISOR_DELETE_USER=yes"
+      - "DOCKER_DD_AGENT=yes"
+      - "NON_LOCAL_TRAFFIC=yes"
+      - "PATH=/opt/datadog-agent/embedded/bin:/opt/datadog-agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      - "PYTHONPATH=/opt/datadog-agent/agent"
+    expose:
+      - "8125/udp"
+      - "8126/tcp"
+    image: "datadog/docker-dd-agent:latest"
+    networks:
+      - "npm_proxy_ms"
+    volumes:
+      - "/proc:/host/proc:ro"
+      - "/sys/fs/cgroup:/host/sys/fs/cgroup:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "$DOCKERDIR/appdata/dd-agentconfig/:/conf.d"
+      - "$DOCKERDIR/appdata/config/dd-agentchecks.d:/checks.d"
+
+  jenkins:
+    <<: *common-keys-apps
+    container_name: "jenkins"
+    entrypoint:
+      - "/usr/bin/tini"
+      - "--"
+      - "/usr/local/bin/jenkins.sh"
+    environment:
+      - "PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      - "LANG=C.UTF-8"
+      - "JENKINS_HOME=/var/jenkins_home"
+      - "JENKINS_SLAVE_AGENT_PORT=50000"
+      - "REF=/usr/share/jenkins/ref"
+      - "JENKINS_VERSION=2.419"
+      - "JENKINS_UC=https://updates.jenkins.io"
+      - "JENKINS_UC_EXPERIMENTAL=https://updates.jenkins.io/experimental"
+      - "JENKINS_INCREMENTALS_REPO_MIRROR=https://repo.jenkins-ci.org/incrementals"
+      - "COPY_REFERENCE_FILE_LOG=/var/jenkins_home/copy_reference_file.log"
+      - "JAVA_HOME=/opt/java/openjdk"
+    image: "jenkins/jenkins:jdk11"
+    networks:
+      - "npm_proxy_ms"
+    ports:
+      - "50000:50000/tcp"
+      - "6325:8080/tcp"
+    user: "jenkins"
+    volumes:
+      - "$DOCKERDIR/appdata/jenkins/jenkins_scripts:/jenkins_scripts"
+
+# Portainer
+  portainer:
+    <<: *common-keys-core
+    container_name: "portainer"
+    entrypoint:
+      - "/portainer"
+    environment:
+      - "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    image: "portainer/portainer-ce:latest"
+    ports:
+      - "8000:8000/tcp"
+      - "9000:9000/tcp"
+      - "9443:9443/tcp"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "portainer_data:/home/docker/portainer/data"
+
