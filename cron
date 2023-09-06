@@ -1,0 +1,2 @@
+ # Append the following to your crontab file `crontab -e` to run every 15m
+*/15 * * * * /home/rajivravio/docker/scripts/copyPutioToServer.sh 55 >> /home/rajivravio/docker/logs/putioTransferLogs.log)
