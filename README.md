@@ -16,4 +16,4 @@ To deploy:
 
 Stack breakdown and comprehensive instructions available here: https://www.cloudopswisdom.com/2023/09/how-to-build-public-facing-plex.html 
 
-Disclaimer: This is for demonstratitive purposes only. I do not condone piracy.
+Disclaimer: This is for demonstratitive purposes only. I am not condoning piracy.
